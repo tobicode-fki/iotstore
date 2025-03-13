@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>elecBazar - IoT Components Store</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <header>
+        <img src="https://via.placeholder.com/50" alt="elecBazar Logo">
+        <h1>elecBazar - IoT Components Store</h1>
+        <nav>
+            <a href="#" id="home-link">Home</a>
+            <a href="#" id="cart-link">Cart</a>
+            <a href="#" id="login-link">Login</a>
+            <a href="#" id="logout-link" class="hidden">Logout</a>
+        </nav>
+        <div class="user-info hidden" id="user-info">Welcome, <span id="user-name"></span></div>
+    </header>
+
+    <div class="slider">
+        <img src="https://via.placeholder.com/1200x400" alt="Slider Image 1">
+    </div>
+
+    <main>
+        <!-- Home Section -->
+        <section id="home-section">
+            <h2>Products</h2>
+            <div>
+                <label for="category-filter">Filter by Category:</label>
+                <select id="category-filter">
+                    <option value="all">All</option>
+                    <option value="Components">Components</option>
+                    <option value="KITs">KITs</option>
+                    <option value="Built Projects">Built Projects</option>
+                </select>
+            </div>
+            <div id="product-list" class="product-list"></div>
+        </section>
+
+        <!-- Cart Section -->
+        <section id="cart-section" class="hidden">
+            <h2>Cart</h2>
+            <ul id="cart"></ul>
+            <div class="cod-option">
+                <p>Payment Method: <strong>Cash on Delivery (COD)</strong></p>
+            </div>
+            <button id="place-order">Place Order</button>
+        </section>
+
+        <!-- Login Section -->
+        <section id="login-section" class="hidden">
+            <h2>Sign Up</h2>
+            <form id="email-signup-form">
+                <input type="email" id="email" placeholder="Enter your email" required>
+                <input type="password" id="password" placeholder="Enter your password" required>
+                <button type="submit">Sign Up</button>
+            </form>
+            <p id="verification-message" class="hidden">A verification email has been sent. Please check your inbox.</p>
+
+            <h2>Login</h2>
+            <form id="email-login-form">
+                <input type="email" id="login-email" placeholder="Enter your email" required>
+                <input type="password" id="login-password" placeholder="Enter your password" required>
+                <button type="submit">Login</button>
+            </form>
+        </section>
+    </main>
+
+    <footer>
+        <p>&copy; 2023 elecBazar. All rights reserved. | <a href="#">Privacy Policy</a></p>
+    </footer>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-app.js";
+        import {
+            getAuth,
+            createUserWithEmailAndPassword,
+            signInWithEmailAndPassword,
+            sendEmailVerification,
+            signOut,
+            onAuthStateChanged,
+        } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-auth.js";
+        import { getFirestore, collection, getDocs, addDoc, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.0.0/firebase-firestore.js";
+
+        // Firebase Configuration
+        const firebaseConfig = {
+            apiKey: "AIzaSyBcZVShuIZsB2_DaxHst825gndcHNUm5V4",
+            authDomain: "iotstore-249ad.firebaseapp.com",
+            projectId: "iotstore-249ad",
+            storageBucket: "iotstore-249ad.appspot.com",
+            messagingSenderId: "882869136462",
+            appId: "1:882869136462:web:9616b7ecb98474ee8e271f"
+        };
+
+        // Initialize Firebase
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        const db = getFirestore(app);
+
+        // DOM Elements
+        const productList = document.getElementById("product-list");
+        const cart = document.getElementById("cart");
+        const placeOrderBtn = document.getElementById("place-order");
+        const categoryFilter = document.getElementById("category-filter");
+        const emailSignupForm = document.getElementById("email-signup-form");
+        const emailInput = document.getElementById("email");
+        const passwordInput = document.getElementById("password");
+        const verificationMessage = document.getElementById("verification-message");
+        const emailLoginForm = document.getElementById("email-login-form");
+        const loginEmailInput = document.getElementById("login-email");
+        const loginPasswordInput = document.getElementById("login-password");
+        const userInfo = document.getElementById("user-info");
+        const userName = document.getElementById("user-name");
+
+        let cartItems = [];
+
+        // Fetch and Display Products
+        async function fetchProducts(category = "all") {
+            const querySnapshot = await getDocs(collection(db, "products"));
+            productList.innerHTML = "";
+            querySnapshot.forEach((doc) => {
+                const product = doc.data();
+                if (category === "all" || product.category === category) {
+                    const productDiv = document.createElement("div");
+                    productDiv.classList.add("product");
+                    productDiv.innerHTML = `
+                        <img src="${product.image}" alt="${product.name}">
+                        <h3>${product.name}</h3>
+                        <p>Price: ₹${product.price}</p>
+                        <button onclick="addToCart('${doc.id}', '${product.name}', ${product.price}, ${product.stock})" ${product.stock <= 0 ? "disabled" : ""}>Add to Cart</button>
+                    `;
+                    productList.appendChild(productDiv);
+                }
+            });
+        }
+
+        // Add Product to Cart
+        async function addToCart(id, name, price, stock) {
+            if (!auth.currentUser) {
+                alert("Please login to add items to cart!");
+                return;
+            }
+            if (stock <= 0) {
+                alert("This product is out of stock!");
+                return;
+            }
+
+            const userId = auth.currentUser.uid;
+            const cartRef = doc(db, "carts", userId);
+            const cartDoc = await getDoc(cartRef);
+
+            let cartData = [];
+            if (cartDoc.exists()) {
+                cartData = cartDoc.data().items;
+            }
+
+            const existingItem = cartData.find((item) => item.id === id);
+            if (existingItem) {
+                existingItem.quantity += 1;
+            } else {
+                cartData.push({ id, name, price, quantity: 1 });
+            }
+
+            await setDoc(cartRef, { items: cartData });
+            cartItems = cartData;
+            updateCartUI();
+        }
+
+        // Make addToCart globally accessible
+        window.addToCart = addToCart;
+
+        // Fetch Cart for Logged-In User
+        async function fetchCart() {
+            if (auth.currentUser) {
+                const userId = auth.currentUser.uid;
+                const cartRef = doc(db, "carts", userId);
+                const cartDoc = await getDoc(cartRef);
+
+                if (cartDoc.exists()) {
+                    cartItems = cartDoc.data().items;
+                } else {
+                    cartItems = [];
+                }
+                updateCartUI();
+            }
+        }
+
+        // Update Cart UI
+        function updateCartUI() {
+            cart.innerHTML = "";
+            cartItems.forEach((item) => {
+                const li = document.createElement("li");
+                li.innerHTML = `
+                    ${item.name} - ₹${item.price} x ${item.quantity}
+                    <button onclick="updateQuantity('${item.id}', ${item.quantity + 1})">+</button>
+                    <button onclick="updateQuantity('${item.id}', ${item.quantity - 1})">-</button>
+                    <button onclick="removeFromCart('${item.id}')">Remove</button>
+                `;
+                cart.appendChild(li);
+            });
+        }
+
+        // Update Quantity
+        async function updateQuantity(id, newQuantity) {
+            const userId = auth.currentUser.uid;
+            const cartRef = doc(db, "carts", userId);
+            const cartDoc = await getDoc(cartRef);
+
+            if (cartDoc.exists()) {
+                let cartData = cartDoc.data().items;
+                const item = cartData.find((item) => item.id === id);
+
+                if (item) {
+                    if (newQuantity <= 0) {
+                        cartData = cartData.filter((item) => item.id !== id);
+                    } else {
+                        item.quantity = newQuantity;
+                    }
+                    await setDoc(cartRef, { items: cartData });
+                    cartItems = cartData;
+                    updateCartUI();
+                }
+            }
+        }
+
+        // Remove Product from Cart
+        async function removeFromCart(id) {
+            const userId = auth.currentUser.uid;
+            const cartRef = doc(db, "carts", userId);
+            const cartDoc = await getDoc(cartRef);
+
+            if (cartDoc.exists()) {
+                let cartData = cartDoc.data().items;
+                cartData = cartData.filter((item) => item.id !== id);
+                await setDoc(cartRef, { items: cartData });
+                cartItems = cartData;
+                updateCartUI();
+            }
+        }
+
+        // Make updateQuantity and removeFromCart globally accessible
+        window.updateQuantity = updateQuantity;
+        window.removeFromCart = removeFromCart;
+
+        // Place Order
+        placeOrderBtn.addEventListener("click", async () => {
+            if (cartItems.length === 0) {
+                alert("Please add items to cart before placing an order!");
+                return;
+            }
+
+            const userId = auth.currentUser.uid;
+            const userDoc = await getDoc(doc(db, "users", userId));
+
+            await addDoc(collection(db, "orders"), {
+                userId,
+                userName: userDoc.data().name,
+                userWhatsApp: userDoc.data().whatsapp,
+                userAddress: userDoc.data().address,
+                items: cartItems,
+                status: "Pending",
+                paymentMethod: "Cash on Delivery (COD)",
+                timestamp: new Date()
+            });
+
+            // Clear the cart after placing the order
+            const cartRef = doc(db, "carts", userId);
+            await setDoc(cartRef, { items: [] });
+
+            alert("Your order has been placed successfully! Payment will be collected on delivery.");
+            cartItems = [];
+            updateCartUI();
+        });
+
+        // Filter Products by Category
+        categoryFilter.addEventListener("change", (e) => {
+            fetchProducts(e.target.value);
+        });
+
+        // Email Signup
+        emailSignupForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = emailInput.value;
+            const password = passwordInput.value;
+
+            try {
+                // Create user with email and password
+                const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                // Send verification email
+                await sendEmailVerification(user);
+                verificationMessage.classList.remove("hidden");
+
+                // Save additional user details
+                const userRef = doc(db, "users", user.uid);
+                await setDoc(userRef, {
+                    email: user.email,
+                    name: prompt("Enter your name:"),
+                    whatsapp: prompt("Enter your WhatsApp number:"),
+                    address: prompt("Enter your address:"),
+                });
+
+                alert("Signup successful! Please verify your email.");
+                window.location.href = "#home-section";
+            } catch (error) {
+                alert("Error during signup: " + error.message);
+            }
+        });
+
+        // Email Login
+        emailLoginForm.addEventListener("submit", async (e) => {
+            e.preventDefault();
+            const email = loginEmailInput.value;
+            const password = loginPasswordInput.value;
+
+            try {
+                // Sign in with email and password
+                const userCredential = await signInWithEmailAndPassword(auth, email, password);
+                const user = userCredential.user;
+
+                if (user.emailVerified) {
+                    alert("Login successful!");
+                    window.location.href = "#home-section";
+                } else {
+                    alert("Please verify your email to access the store.");
+                    await signOut(auth); // Log out the user if email is not verified
+                }
+            } catch (error) {
+                alert("Login failed: " + error.message);
+            }
+        });
+
+        // Check Email Verification Status
+        onAuthStateChanged(auth, (user) => {
+            if (user) {
+                if (user.emailVerified) {
+                    // User is verified
+                    document.getElementById("login-link").classList.add("hidden");
+                    document.getElementById("logout-link").classList.remove("hidden");
+                    userInfo.classList.remove("hidden");
+                    userName.textContent = user.displayName || "User";
+                    fetchCart(); // Fetch the user's cart on page load
+                    fetchProducts();
+                } else {
+                    // User is not verified
+                    alert("Please verify your email to access the store.");
+                    signOut(auth); // Log out the user if email is not verified
+                }
+            } else {
+                // User is not logged in
+                document.getElementById("login-link").classList.remove("hidden");
+                document.getElementById("logout-link").classList.add("hidden");
+                userInfo.classList.add("hidden");
+                cartItems = []; // Clear the cart if the user is not logged in
+                updateCartUI();
+            }
+        });
+
+        // Logout
+        document.getElementById("logout-link").addEventListener("click", async () => {
+            await signOut(auth);
+            alert("Logged out successfully!");
+            window.location.href = "#home-section";
+        });
+
+        // Show/Hide Sections
+        document.querySelectorAll("nav a").forEach((link) => {
+            link.addEventListener("click", (e) => {
+                e.preventDefault();
+                document.querySelectorAll("section").forEach((section) => {
+                    section.classList.add("hidden");
+                });
+                document.getElementById(link.id.replace("-link", "-section")).classList.remove("hidden");
+            });
+        });
+
+        // Initialize
+        fetchProducts();
+    </script>
+</body>
+</html>
